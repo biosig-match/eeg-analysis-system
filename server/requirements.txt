@@ -1,0 +1,7 @@
+flask
+numpy
+mne
+mne_connectivity
+matplotlib
+scikit-learn
+zstandard
