@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'ble_provider.dart';
 import 'analysis_provider.dart';
 import 'dart:async';
+import 'package:location/location.dart' hide PermissionStatus; // ★ locationパッケージをインポート
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,10 +16,14 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   Timer? _waveformRefreshTimer;
+  final Location location = Location(); // ★ Locationのインスタンスを作成
 
   @override
   void initState() {
     super.initState();
+    // ★ アプリ起動時に権限の確認とリクエストを行うメソッドを呼び出す
+    _initializePermissions();
+
     _waveformRefreshTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
       if (mounted) {
         context.read<BleProvider>().refreshWaveform();
@@ -32,21 +37,114 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  Future<void> _requestPermissionsAndScan(BleProvider bleProvider, AnalysisProvider analysisProvider) async {
-    Map<Permission, PermissionStatus> statuses = await [Permission.location, Permission.bluetoothScan, Permission.bluetoothConnect,].request();
-    if (statuses[Permission.location]!.isGranted && statuses[Permission.bluetoothScan]!.isGranted && statuses[Permission.bluetoothConnect]!.isGranted) {
-      bleProvider.startScan();
-      analysisProvider.startPolling();
-    } else {
-      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bluetoothと位置情報の権限を許可してください')),); }
+  // ★ 変更：アプリ起動時に権限状態を包括的にチェックし、リクエストするメソッド
+  Future<void> _initializePermissions() async {
+    // 1. OS全体のGPS（位置情報サービス）が有効になっているか確認
+    bool serviceEnabled = await location.serviceEnabled();
+    if (!serviceEnabled) {
+      // 有効でない場合、ユーザーに有効にするようリクエスト
+      serviceEnabled = await location.requestService();
+      if (!serviceEnabled) {
+        // ユーザーが有効にしなかった場合は、ここで処理を中断
+        print("位置情報サービスが有効にされませんでした。");
+        return;
+      }
     }
+
+    // 2. アプリに必要な権限（位置情報とBluetooth）をリクエスト
+    // このrequest()メソッドは、まだ許可されていない権限についてのみダイアログを表示します。
+    await [
+      Permission.location,
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+    ].request();
   }
+
+// ★★★★★ このメソッドを最終版に完全に置き換えてください ★★★★★
+Future<void> _requestPermissionsAndScan(BleProvider bleProvider, AnalysisProvider analysisProvider) async {
+  print("--- Starting Final Permission & Scan Logic ---");
+
+  // 1. 位置情報サービスの状態を permission_handler で確認
+  bool serviceEnabled = await Permission.location.serviceStatus.isEnabled;
+  if (!serviceEnabled) {
+    print("Location service is disabled. Prompting user to open settings.");
+    _showLocationServiceDisabledDialog();
+    await openAppSettings();
+    return;
+  }
+
+  // 2. 位置情報権限のみを permission_handler でリクエスト (iOSのルールに従う)
+  print("Requesting location permissions...");
+  final locationWhenInUseStatus = await Permission.locationWhenInUse.request();
+  if (!locationWhenInUseStatus.isGranted) {
+    // もし「使用中のみ」が許可されなければ、「常に」はリクエストしない
+    print("Location 'When in Use' was not granted. Status: $locationWhenInUseStatus");
+    _showPermissionDeniedDialog();
+    return;
+  }
+
+  // 「使用中のみ」が許可されたら、「常に」をリクエスト
+  final locationAlwaysStatus = await Permission.locationAlways.request();
+  print("Location 'Always' status: $locationAlwaysStatus");
+
+  // 3. Bluetoothのことは flutter_blue_plus に任せ、スキャンを直接開始する
+  // bleProvider.startScan() が内部で flutter_blue_plus を呼び出し、
+  // 必要なBluetooth権限ダイアログを自動的に表示します。
+  print("Location granted. Handing over to BleProvider to start scan (which handles BT permissions)...");
+  
+  bleProvider.startScan();
+  analysisProvider.startPolling();
+}
+  
+  // ★ 追加：位置情報サービスが無効な場合に表示するダイアログ
+  void _showLocationServiceDisabledDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('位置情報サービスを有効にしてください'),
+        content: const Text('デバイスをスキャンするには、端末の位置情報サービスをオンにする必要があります。'),
+        actions: <Widget>[
+          TextButton(
+            child: const Text('OK'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ★ 権限が拒否された場合に表示するダイアログ (変更なし)
+  void _showPermissionDeniedDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('権限が必要です'),
+        content: const Text('デバイスをスキャンして接続するには、Bluetoothと位置情報の権限を許可してください。設定アプリから権限を有効にできます。'),
+        actions: <Widget>[
+          TextButton(
+            child: const Text('設定を開く'),
+            onPressed: () {
+              // 端末の設定画面を開く
+              openAppSettings();
+              Navigator.of(context).pop();
+            },
+          ),
+          TextButton(
+            child: const Text('キャンセル'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   void _disconnect(BleProvider bleProvider, AnalysisProvider analysisProvider) {
       bleProvider.disconnect();
       analysisProvider.stopPolling();
   }
 
+  // (以降のbuildメソッドは変更なし)
   @override
   Widget build(BuildContext context) {
     final bleProvider = context.watch<BleProvider>();
@@ -59,7 +157,7 @@ class _HomeScreenState extends State<HomeScreen> {
         appBar: AppBar(
           backgroundColor: const Color(0xFF161C27),
           title: const Text(
-            'EEG Visualizer & Analyzer', 
+            'EEG Visualizer & Analyzer',
             style: TextStyle(color: Colors.white)
           ),
           bottom: const TabBar(
@@ -126,7 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ★★★★★ This is the updated widget ★★★★★
+  // (以降の _buildControlButton と _buildStatusCard は変更なし)
   Widget _buildControlButton(BleProvider bleProvider, AnalysisProvider analysisProvider) {
     bool isConnected = bleProvider.connectionState == BleConnectionState.connected;
     bool isScanning = bleProvider.connectionState == BleConnectionState.scanning || bleProvider.connectionState == BleConnectionState.connecting;
@@ -135,18 +233,19 @@ class _HomeScreenState extends State<HomeScreen> {
       icon: Icon(isConnected ? Icons.link_off : Icons.search),
       label: Text(isConnected ? 'Disconnect' : 'Find Device'),
       style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.white, // Background color is now white
-        foregroundColor: isConnected ? Colors.purple : Colors.blue, // Text/icon color changes
-        minimumSize: const Size(220, 50), // Set a minimum width and height
+        backgroundColor: Colors.white,
+        foregroundColor: isConnected ? Colors.purple : Colors.blue,
+        minimumSize: const Size(220, 50),
         padding: const EdgeInsets.symmetric(vertical: 15),
         textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        elevation: 5, // Add a little shadow
+        elevation: 5,
       ),
       onPressed: isScanning ? null : () {
         if (isConnected) {
           _disconnect(bleProvider, analysisProvider);
         } else {
+          // ★修正：更新された権限リクエストメソッドを呼び出す
           _requestPermissionsAndScan(bleProvider, analysisProvider);
         }
       },

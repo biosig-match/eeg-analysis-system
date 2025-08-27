@@ -4,8 +4,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-const String serverIp = "192.168.128.151"; 
-const String serverResultsUrl = "http://$serverIp:5000/results";
+const String serverIp = "192.168.11.6"; // サーバー（自身のPC）のIPアドレスに置き換えてください（実環境の場合はhttp://）
+const String serverResultsUrl = "http://$serverIp:6000/results";
 
 // ★快不快度を削除
 class AnalysisResult {

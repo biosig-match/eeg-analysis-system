@@ -43,3 +43,14 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# iOS specific
+ios/build/
+ios/Podfile.lock
+
+# macOS specific
+macos/build/
+macos/Podfile.lock
+
+# Development tools
+devtools_options.yaml
