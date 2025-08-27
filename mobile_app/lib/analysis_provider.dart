@@ -4,9 +4,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-const String serverIp = "192.168.11.6"; // サーバー（自身のPC）のIPアドレスに置き換えてください（実環境の場合はhttp://）
-const String serverResultsUrl = "http://$serverIp:6000/results";
-
 // ★快不快度を削除
 class AnalysisResult {
   final Uint8List? psdImage;
@@ -15,6 +12,8 @@ class AnalysisResult {
 }
 
 class AnalysisProvider with ChangeNotifier {
+  final String _baseUrl;
+  AnalysisProvider(this._baseUrl);
   Timer? _pollingTimer;
   AnalysisResult? _latestAnalysis;
   String _analysisStatus = "サーバーからの解析結果を待っています...";
@@ -26,7 +25,7 @@ class AnalysisProvider with ChangeNotifier {
   void startPolling() {
     stopPolling();
     // ★初回はすぐに実行
-    fetchLatestResults(); 
+    fetchLatestResults();
     _pollingTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       fetchLatestResults();
     });
@@ -41,8 +40,8 @@ class AnalysisProvider with ChangeNotifier {
     _isFetching = true;
 
     try {
-      final response = await http.get(Uri.parse(serverResultsUrl))
-          .timeout(const Duration(seconds: 5));
+      final url = Uri.parse('$_baseUrl/results');
+      final response = await http.get(url).timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
         final results = jsonDecode(response.body);
@@ -51,7 +50,8 @@ class AnalysisProvider with ChangeNotifier {
             psdImage: base64Decode(results['psd_image']),
             coherenceImage: base64Decode(results['coherence_image']),
           );
-          _analysisStatus = "解析結果を更新しました (${DateTime.now().hour}:${DateTime.now().minute})";
+          _analysisStatus =
+              "解析結果を更新しました (${DateTime.now().hour}:${DateTime.now().minute})";
         } else {
           _analysisStatus = "サーバーでデータを蓄積中...";
         }
