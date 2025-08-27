@@ -26,7 +26,7 @@ except ImportError:
 
 # --- 設定 ---
 HOST = '0.0.0.0'
-PORT = 5000
+PORT = 6000
 SAMPLE_RATE = 300
 NUM_EEG_CHANNELS = 8
 # ★★★★★ 標準的な10-20法の名前に変更 ★★★★★
