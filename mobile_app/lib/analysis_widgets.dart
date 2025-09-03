@@ -77,13 +77,11 @@ class ValenceMonitor extends StatelessWidget {
                 showTitles: true,
                 reservedSize: 40,
                 getTitlesWidget: (value, meta) {
-                  return SideTitleWidget(
-                    axisSide: meta.axisSide,
-                    space: 4,
-                    child: Text(
-                      meta.formattedValue,
-                      style: const TextStyle(color: Colors.white70, fontSize: 10),
-                    ),
+                  // ★修正: fl_chart v1.1.0+ ではSideTitleWidgetは不要になりました。
+                  // Textウィジェットを直接返します。
+                  return Text(
+                    meta.formattedValue,
+                    style: const TextStyle(color: Colors.white70, fontSize: 10),
                   );
                 },
               ),
@@ -95,11 +93,9 @@ class ValenceMonitor extends StatelessWidget {
                 interval: 30000, // 30秒
                 getTitlesWidget: (value, meta) {
                   final dt = DateTime.fromMillisecondsSinceEpoch(value.toInt());
-                  return SideTitleWidget(
-                    axisSide: meta.axisSide,
-                    space: 4,
-                    child: Text(DateFormat('HH:mm:ss').format(dt), style: const TextStyle(color: Colors.white70, fontSize: 10)),
-                  );
+                  // ★修正: fl_chart v1.1.0+ ではSideTitleWidgetは不要になりました。
+                  // Textウィジェットを直接返します。
+                  return Text(DateFormat('HH:mm:ss').format(dt), style: const TextStyle(color: Colors.white70, fontSize: 10));
                 },
               ),
             ),

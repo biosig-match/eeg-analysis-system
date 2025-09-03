@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'ble_provider.dart';
 import 'home_screen.dart';
 import 'config.dart';
+import 'measurement_provider.dart'; // ★追加
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,11 +20,12 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ★MultiProviderを使って複数のプロバイダを登録
+    // ★MultiProviderにMeasurementProviderを追加
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (context) => BleProvider(serverConfig.baseUrl)),
         ChangeNotifierProvider(create: (context) => AnalysisProvider(serverConfig.baseUrl)),
+        ChangeNotifierProvider(create: (context) => MeasurementProvider(serverConfig.baseUrl)), // ★追加
       ],
       child: MaterialApp(
         title: 'EEG Visualizer & Analyzer',

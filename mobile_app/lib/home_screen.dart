@@ -6,7 +6,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'ble_provider.dart';
 import 'analysis_provider.dart';
 import 'dart:async';
-import 'package:location/location.dart' hide PermissionStatus; // ★ locationパッケージをインポート
+
+import 'measurement_provider.dart'; // ★追加
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -16,16 +17,17 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   Timer? _waveformRefreshTimer;
-  final Location location = Location(); // ★ Locationのインスタンスを作成
 
   @override
   void initState() {
     super.initState();
-    // ★ アプリ起動時に権限の確認とリクエストを行うメソッドを呼び出す
-    _initializePermissions();
+    // MeasurementProviderの初期化処理を呼び出す
+    context.read<MeasurementProvider>().initialize().then((_) {
+      print("MeasurementProvider initialized.");
+    });
 
     _waveformRefreshTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
-      if (mounted) {
+      if (mounted && context.read<BleProvider>().connectionState == BleConnectionState.connected) {
         context.read<BleProvider>().refreshWaveform();
       }
     });
@@ -37,94 +39,40 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // ★ 変更：アプリ起動時に権限状態を包括的にチェックし、リクエストするメソッド
-  Future<void> _initializePermissions() async {
-    // 1. OS全体のGPS（位置情報サービス）が有効になっているか確認
-    bool serviceEnabled = await location.serviceEnabled();
-    if (!serviceEnabled) {
-      // 有効でない場合、ユーザーに有効にするようリクエスト
-      serviceEnabled = await location.requestService();
-      if (!serviceEnabled) {
-        // ユーザーが有効にしなかった場合は、ここで処理を中断
-        print("位置情報サービスが有効にされませんでした。");
-        return;
-      }
-    }
-
-    // 2. アプリに必要な権限（位置情報とBluetooth）をリクエスト
-    // このrequest()メソッドは、まだ許可されていない権限についてのみダイアログを表示します。
-    await [
+  // ★ 権限リクエストロジックを更新
+  Future<void> _requestPermissionsAndScan(BleProvider bleProvider, AnalysisProvider analysisProvider) async {
+    // 必要なすべての権限を一度にリクエスト
+    final statuses = await [
       Permission.location,
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
+      Permission.camera,
+      Permission.microphone,
     ].request();
+
+    // 重要な権限が許可されているかチェック
+    if (statuses[Permission.location]!.isGranted &&
+        statuses[Permission.bluetoothScan]!.isGranted &&
+        statuses[Permission.bluetoothConnect]!.isGranted) {
+      print("BLE permissions granted. Starting scan.");
+      bleProvider.startScan();
+      analysisProvider.startPolling();
+    } else {
+      print("Core permissions denied.");
+      _showPermissionDeniedDialog();
+    }
   }
 
-// ★★★★★ このメソッドを最終版に完全に置き換えてください ★★★★★
-Future<void> _requestPermissionsAndScan(BleProvider bleProvider, AnalysisProvider analysisProvider) async {
-  print("--- Starting Final Permission & Scan Logic ---");
-
-  // 1. 位置情報サービスの状態を permission_handler で確認
-  bool serviceEnabled = await Permission.location.serviceStatus.isEnabled;
-  if (!serviceEnabled) {
-    print("Location service is disabled. Prompting user to open settings.");
-    _showLocationServiceDisabledDialog();
-    await openAppSettings();
-    return;
-  }
-
-  // 2. 位置情報権限のみを permission_handler でリクエスト (iOSのルールに従う)
-  print("Requesting location permissions...");
-  final locationWhenInUseStatus = await Permission.locationWhenInUse.request();
-  if (!locationWhenInUseStatus.isGranted) {
-    // もし「使用中のみ」が許可されなければ、「常に」はリクエストしない
-    print("Location 'When in Use' was not granted. Status: $locationWhenInUseStatus");
-    _showPermissionDeniedDialog();
-    return;
-  }
-
-  // 「使用中のみ」が許可されたら、「常に」をリクエスト
-  final locationAlwaysStatus = await Permission.locationAlways.request();
-  print("Location 'Always' status: $locationAlwaysStatus");
-
-  // 3. Bluetoothのことは flutter_blue_plus に任せ、スキャンを直接開始する
-  // bleProvider.startScan() が内部で flutter_blue_plus を呼び出し、
-  // 必要なBluetooth権限ダイアログを自動的に表示します。
-  print("Location granted. Handing over to BleProvider to start scan (which handles BT permissions)...");
-  
-  bleProvider.startScan();
-  analysisProvider.startPolling();
-}
-  
-  // ★ 追加：位置情報サービスが無効な場合に表示するダイアログ
-  void _showLocationServiceDisabledDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('位置情報サービスを有効にしてください'),
-        content: const Text('デバイスをスキャンするには、端末の位置情報サービスをオンにする必要があります。'),
-        actions: <Widget>[
-          TextButton(
-            child: const Text('OK'),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ★ 権限が拒否された場合に表示するダイアログ (変更なし)
   void _showPermissionDeniedDialog() {
     showDialog(
       context: context,
       builder: (BuildContext context) => AlertDialog(
         title: const Text('権限が必要です'),
-        content: const Text('デバイスをスキャンして接続するには、Bluetoothと位置情報の権限を許可してください。設定アプリから権限を有効にできます。'),
+        content: const Text('アプリを機能させるには、位置情報、Bluetooth、カメラ、マイクの権限が必要です。'),
         actions: <Widget>[
           TextButton(
             child: const Text('設定を開く'),
             onPressed: () {
-              // 端末の設定画面を開く
               openAppSettings();
               Navigator.of(context).pop();
             },
@@ -138,18 +86,22 @@ Future<void> _requestPermissionsAndScan(BleProvider bleProvider, AnalysisProvide
     );
   }
 
-
-  void _disconnect(BleProvider bleProvider, AnalysisProvider analysisProvider) {
+  void _disconnect(BleProvider bleProvider, AnalysisProvider analysisProvider, MeasurementProvider measurementProvider) {
+      // 計測中であれば停止する
+      if (measurementProvider.isMeasuring) {
+        measurementProvider.stopMeasurement();
+      }
       bleProvider.disconnect();
       analysisProvider.stopPolling();
   }
 
-  // (以降のbuildメソッドは変更なし)
   @override
   Widget build(BuildContext context) {
     final bleProvider = context.watch<BleProvider>();
     final analysisProvider = context.watch<AnalysisProvider>();
+    final measurementProvider = context.watch<MeasurementProvider>(); // ★追加
     final channelCount = bleProvider.channelCount;
+    final isConnected = bleProvider.connectionState == BleConnectionState.connected;
 
     return DefaultTabController(
       length: 3,
@@ -212,9 +164,13 @@ Future<void> _requestPermissionsAndScan(BleProvider bleProvider, AnalysisProvide
               padding: const EdgeInsets.fromLTRB(16.0, 8.0, 16.0, 16.0),
               child: Column(
                 children: [
-                  _buildStatusCard(bleProvider, analysisProvider),
+                  _buildStatusCard(bleProvider, analysisProvider, measurementProvider), // ★引数追加
                   const SizedBox(height: 12),
-                  _buildControlButton(bleProvider, analysisProvider),
+                  // ★ 接続状態に応じて表示するボタンを変更
+                  if (!isConnected)
+                    _buildScanButton(bleProvider, analysisProvider)
+                  else
+                    _buildConnectedActionButtons(bleProvider, analysisProvider, measurementProvider),
                 ],
               ),
             ),
@@ -224,64 +180,108 @@ Future<void> _requestPermissionsAndScan(BleProvider bleProvider, AnalysisProvide
     );
   }
 
-  // (以降の _buildControlButton と _buildStatusCard は変更なし)
-  Widget _buildControlButton(BleProvider bleProvider, AnalysisProvider analysisProvider) {
-    bool isConnected = bleProvider.connectionState == BleConnectionState.connected;
+  // ★ スキャンボタン
+  Widget _buildScanButton(BleProvider bleProvider, AnalysisProvider analysisProvider) {
     bool isScanning = bleProvider.connectionState == BleConnectionState.scanning || bleProvider.connectionState == BleConnectionState.connecting;
 
     return ElevatedButton.icon(
-      icon: Icon(isConnected ? Icons.link_off : Icons.search),
-      label: Text(isConnected ? 'Disconnect' : 'Find Device'),
+      icon: const Icon(Icons.search),
+      label: const Text('Find Device'),
       style: ElevatedButton.styleFrom(
         backgroundColor: Colors.white,
-        foregroundColor: isConnected ? Colors.purple : Colors.blue,
-        minimumSize: const Size(220, 50),
-        padding: const EdgeInsets.symmetric(vertical: 15),
+        foregroundColor: Colors.blue,
+        minimumSize: const Size(double.infinity, 50),
         textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        elevation: 5,
       ),
       onPressed: isScanning ? null : () {
-        if (isConnected) {
-          _disconnect(bleProvider, analysisProvider);
-        } else {
-          // ★修正：更新された権限リクエストメソッドを呼び出す
-          _requestPermissionsAndScan(bleProvider, analysisProvider);
-        }
+        _requestPermissionsAndScan(bleProvider, analysisProvider);
       },
     );
   }
+  
+  // ★ 接続後のアクションボタン
+  Widget _buildConnectedActionButtons(BleProvider bleProvider, AnalysisProvider analysisProvider, MeasurementProvider measurementProvider) {
+    final isMeasuring = measurementProvider.isMeasuring;
 
-  Widget _buildStatusCard(BleProvider bleProvider, AnalysisProvider analysisProvider) {
-    String statusText; IconData statusIcon; Color statusColor;
+    return Row(
+      children: [
+        // 計測開始・停止ボタン
+        Expanded(
+          child: ElevatedButton.icon(
+            icon: Icon(isMeasuring ? Icons.stop_circle_outlined : Icons.play_circle_outline),
+            label: Text(isMeasuring ? 'Stop Measurement' : 'Start Measurement'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isMeasuring ? Colors.redAccent : Colors.greenAccent,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 50),
+              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            onPressed: () {
+              if (isMeasuring) {
+                measurementProvider.stopMeasurement();
+              } else {
+                measurementProvider.startMeasurement();
+              }
+            },
+          ),
+        ),
+        const SizedBox(width: 12),
+        // 切断ボタン
+        ElevatedButton.icon(
+          icon: const Icon(Icons.link_off),
+          label: const Text('Disconnect'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.white,
+            foregroundColor: Colors.purple,
+            minimumSize: const Size(0, 50),
+             textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          onPressed: () {
+            _disconnect(bleProvider, analysisProvider, measurementProvider);
+          },
+        ),
+      ],
+    );
+  }
+
+  // ★ ステータス表示を更新
+  Widget _buildStatusCard(BleProvider bleProvider, AnalysisProvider analysisProvider, MeasurementProvider measurementProvider) {
+    String bleStatusText; IconData bleStatusIcon; Color bleStatusColor;
     switch (bleProvider.connectionState) {
-      case BleConnectionState.disconnected: statusText = 'Disconnected'; statusIcon = Icons.bluetooth_disabled; statusColor = Colors.redAccent; break;
-      case BleConnectionState.scanning: statusText = 'Scanning...'; statusIcon = Icons.bluetooth_searching; statusColor = Colors.orangeAccent; break;
-      case BleConnectionState.connecting: statusText = 'Connecting...'; statusIcon = Icons.bluetooth_connected; statusColor = Colors.lightBlueAccent; break;
-      case BleConnectionState.connected: statusText = 'Connected'; statusIcon = Icons.bluetooth_connected; statusColor = Colors.cyanAccent; break;
+      case BleConnectionState.disconnected: bleStatusText = 'Disconnected'; bleStatusIcon = Icons.bluetooth_disabled; bleStatusColor = Colors.redAccent; break;
+      case BleConnectionState.scanning: bleStatusText = 'Scanning...'; bleStatusIcon = Icons.bluetooth_searching; bleStatusColor = Colors.orangeAccent; break;
+      case BleConnectionState.connecting: bleStatusText = 'Connecting...'; bleStatusIcon = Icons.bluetooth_connected; bleStatusColor = Colors.lightBlueAccent; break;
+      case BleConnectionState.connected: bleStatusText = 'Connected'; bleStatusIcon = Icons.bluetooth_connected; bleStatusColor = Colors.cyanAccent; break;
     }
+
     return Card(
       elevation: 4,
       color: const Color(0xFF2C3545),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+        padding: const EdgeInsets.all(12.0),
         child: Column(
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(statusIcon, size: 24, color: statusColor),
+                Icon(bleStatusIcon, size: 24, color: bleStatusColor),
                 const SizedBox(width: 8),
-                Text(statusText, style: TextStyle(fontSize: 18, color: statusColor, fontWeight: FontWeight.bold)),
+                Text(bleStatusText, style: TextStyle(fontSize: 18, color: bleStatusColor, fontWeight: FontWeight.bold)),
               ],
             ),
+            const Divider(color: Colors.white24, height: 16),
+            // ★ 計測ステータスを追加
             if (bleProvider.connectionState == BleConnectionState.connected)
-              Padding(
-                padding: const EdgeInsets.only(top: 4.0),
-                child: Text(
-                  analysisProvider.analysisStatus,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
+              Text(
+                measurementProvider.statusMessage,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                textAlign: TextAlign.center,
+              )
+            else
+              Text(
+                analysisProvider.analysisStatus,
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                textAlign: TextAlign.center,
               ),
           ],
         ),
