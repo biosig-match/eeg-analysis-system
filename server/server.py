@@ -12,11 +12,11 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import zstandard
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 
 matplotlib.use("Agg")
-# MNEライブラリのインポート
 
+# MNEライブラリのインポート
 try:
     import mne
     from mne_connectivity import spectral_connectivity_epochs
@@ -28,14 +28,14 @@ except ImportError:
 
 # --- 設定 ---
 HOST = "0.0.0.0"
-PORT = 6000
+PORT = 8080
 SAMPLE_RATE = 300
 NUM_EEG_CHANNELS = 8
-# ★★★★★ 標準的な10-20法の名前に変更 ★★★★★
 CHANNEL_NAMES = ["Fp1", "Fp2", "F7", "F8", "T7", "T8", "P7", "P8"]
 ANALYSIS_WINDOW_SEC = 2.0
 ANALYSIS_WINDOW_SAMPLES = int(SAMPLE_RATE * ANALYSIS_WINDOW_SEC)
 DB_FILE = "eeg_data.db"
+EPOCH_DATA_DIR = "epoch_data"
 
 # --- Flask & スレッド間データ共有のセットアップ ---
 app = Flask(__name__)
@@ -44,11 +44,15 @@ latest_analysis_results = {}
 analysis_lock = threading.Lock()
 initial_data_received = threading.Event()
 
+# ★★★★★ 最新の画像パスを保持する変数とロックを追加 ★★★★★
+LATEST_IMAGE_PATH = None
+image_lock = threading.Lock()
+
+
 if MNE_AVAILABLE:
     mne_info = mne.create_info(
         ch_names=CHANNEL_NAMES, sfreq=SAMPLE_RATE, ch_types="eeg"
     )
-    # ★★★★★ 10-20法の電極位置情報（モンタージュ）を設定 ★★★★★
     try:
         montage = mne.channels.make_standard_montage("standard_1020")
         mne_info.set_montage(montage, on_missing="warn")
@@ -58,7 +62,6 @@ if MNE_AVAILABLE:
         )
 
 
-# (以降のコードは、MNE解析関数以外は変更ありません)
 def init_db():
     if os.path.exists(DB_FILE):
         os.remove(DB_FILE)
@@ -114,6 +117,7 @@ def create_analysis_thread(target_func, interval_sec):
                     target_func(data)
             except Exception as e:
                 print(f"Error in {target_func.__name__}: {e}")
+                traceback.print_exc()
             time.sleep(interval_sec)
 
     thread = threading.Thread(target=worker, daemon=True)
@@ -147,7 +151,7 @@ def analyze_coherence(data):
         fmax=13,
         faverage=True,
         verbose=False,
-    )  # Alpha band
+    )
     con_matrix = np.squeeze(con.get_data(output="dense"))
     fig_coh, ax = plt.subplots(figsize=(5, 5), subplot_kw=dict(polar=True))
     plot_connectivity_circle(
@@ -182,7 +186,6 @@ def upload_endpoint():
     try:
         compressed_data = base64.b64decode(json_data["data"])
         raw_bytes = zstandard.ZstdDecompressor().decompress(compressed_data)
-        # point_size = 68
         struct_format = "<" + "H" * NUM_EEG_CHANNELS + "f" * 12 + "I"
         records = []
         for chunk in struct.iter_unpack(struct_format, raw_bytes):
@@ -196,6 +199,49 @@ def upload_endpoint():
         return jsonify({"error": str(e)}), 500
 
 
+# ★★★★★ 新しいエンドポイント: 画像と音声を受け取る ★★★★★
+@app.route("/upload_epoch", methods=["POST"])
+def upload_epoch_endpoint():
+    global LATEST_IMAGE_PATH
+    try:
+        if 'image' not in request.files or 'audio' not in request.files:
+            return jsonify({"error": "image or audio file is missing"}), 400
+
+        epoch_number = request.form.get("epoch_number", "unknown_epoch")
+        timestamp = request.form.get("timestamp", time.strftime("%Y-%m-%dT%H_%M_%S"))
+
+        image_file = request.files['image']
+        audio_file = request.files['audio']
+        
+        # エポックごとのディレクトリを作成
+        epoch_dir = os.path.join(EPOCH_DATA_DIR, f"epoch_{epoch_number}")
+        os.makedirs(epoch_dir, exist_ok=True)
+
+        # ファイル名を生成して保存
+        # タイムスタンプの':'を'-'に置換してファイル名として使えるようにする
+        safe_timestamp = timestamp.replace(":", "-")
+        image_filename = f"image_{safe_timestamp}.jpg"
+        audio_filename = f"audio_{safe_timestamp}.m4a"
+        
+        image_path = os.path.join(epoch_dir, image_filename)
+        audio_path = os.path.join(epoch_dir, audio_filename)
+
+        image_file.save(image_path)
+        audio_file.save(audio_path)
+
+        # 最新の画像パスを更新
+        with image_lock:
+            LATEST_IMAGE_PATH = image_path
+        
+        print(f"Epoch {epoch_number}: Image saved to {image_path}, Audio saved to {audio_path}")
+        return jsonify({"status": "epoch data received and saved"}), 200
+
+    except Exception as e:
+        print(f"Error in /upload_epoch: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/results", methods=["GET"])
 def results_endpoint():
     with analysis_lock:
@@ -204,13 +250,43 @@ def results_endpoint():
         return jsonify(latest_analysis_results)
 
 
+# ★★★★★ 新しいエンドポイント: 最新の画像を表示する ★★★★★
+@app.route("/latest_image", methods=["GET"])
+def latest_image_endpoint():
+    with image_lock:
+        image_path = LATEST_IMAGE_PATH
+
+    if image_path and os.path.exists(image_path):
+        try:
+            # send_from_directory を使って安全にファイルを送信
+            directory, filename = os.path.split(image_path)
+            return send_from_directory(directory, filename)
+        except Exception as e:
+            print(f"Error serving latest image: {e}")
+            return jsonify({"error": "Could not serve the image"}), 500
+    else:
+        # 画像がまだない場合は404エラーを返す
+        return "No image has been uploaded yet.", 404
+
+
 if __name__ == "__main__":
     init_db()
+    # ★★★★★ 起動時にデータ保存用ディレクトリを作成 ★★★★★
+    if not os.path.exists(EPOCH_DATA_DIR):
+        os.makedirs(EPOCH_DATA_DIR)
+
     threading.Thread(target=db_writer_thread, daemon=True).start()
-    create_analysis_thread(analyze_psd, 10.0).start()
-    create_analysis_thread(analyze_coherence, 12.0).start()
+    
+    if MNE_AVAILABLE:
+        create_analysis_thread(analyze_psd, 10.0).start()
+        create_analysis_thread(analyze_coherence, 12.0).start()
+    else:
+        print("\nWARNING: MNE-Python is not installed. Analysis threads will not start.\n")
+
     print("=" * 50)
     print(" EEG Analysis Server (Final Architecture)")
     print(f" Listening on http://{HOST}:{PORT}")
+    print(f" Epoch data will be saved to: '{EPOCH_DATA_DIR}/'")
+    print(" >>> View latest image at: http://<YOUR_SERVER_IP>:<PORT>/latest_image <<<")
     print("=" * 50)
     app.run(host=HOST, port=PORT, debug=False)

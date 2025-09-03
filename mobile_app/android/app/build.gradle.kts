@@ -19,7 +19,7 @@ val flutterVersionName = localProperties.getProperty("flutter.versionName") ?: "
 
 android {
     namespace = "com.example.eeg_visualizer_app"
-    compileSdk = 34
+    compileSdk = 36
 
     ndkVersion = flutter.ndkVersion
 

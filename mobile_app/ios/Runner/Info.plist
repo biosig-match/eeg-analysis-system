@@ -10,6 +10,10 @@
 	<string>このアプリは、バックグラウンドでもBluetoothデバイスをスキャンするために位置情報を利用します。</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>このアプリは、Bluetoothデバイスに接続するために位置情報を利用します。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>脳波データと同期して周囲の状況を記録するため、写真撮影にカメラを使用します。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>脳波データと同期して周囲の音声を記録するため、マイクへのアクセスが必要です。</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -55,3 +59,4 @@
 	<true/>
 </dict>
 </plist>
+
