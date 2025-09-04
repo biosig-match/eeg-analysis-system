@@ -250,24 +250,6 @@ def results_endpoint():
         return jsonify(latest_analysis_results)
 
 
-# ★★★★★ 新しいエンドポイント: 最新の画像を表示する ★★★★★
-@app.route("/latest_image", methods=["GET"])
-def latest_image_endpoint():
-    with image_lock:
-        image_path = LATEST_IMAGE_PATH
-
-    if image_path and os.path.exists(image_path):
-        try:
-            # send_from_directory を使って安全にファイルを送信
-            directory, filename = os.path.split(image_path)
-            return send_from_directory(directory, filename)
-        except Exception as e:
-            print(f"Error serving latest image: {e}")
-            return jsonify({"error": "Could not serve the image"}), 500
-    else:
-        # 画像がまだない場合は404エラーを返す
-        return "No image has been uploaded yet.", 404
-
 
 if __name__ == "__main__":
     init_db()
@@ -287,6 +269,5 @@ if __name__ == "__main__":
     print(" EEG Analysis Server (Final Architecture)")
     print(f" Listening on http://{HOST}:{PORT}")
     print(f" Epoch data will be saved to: '{EPOCH_DATA_DIR}/'")
-    print(" >>> View latest image at: http://<YOUR_SERVER_IP>:<PORT>/latest_image <<<")
     print("=" * 50)
     app.run(host=HOST, port=PORT, debug=False)

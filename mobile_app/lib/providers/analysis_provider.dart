@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import '../utils/config.dart'; // ★★★
 
-// ★快不快度を削除
 class AnalysisResult {
   final Uint8List? psdImage;
   final Uint8List? coherenceImage;
@@ -12,8 +12,10 @@ class AnalysisResult {
 }
 
 class AnalysisProvider with ChangeNotifier {
-  final String _baseUrl;
-  AnalysisProvider(this._baseUrl);
+  // ★★★ ServerConfigを受け取るように修正 ★★★
+  final ServerConfig _config;
+  AnalysisProvider(this._config);
+
   Timer? _pollingTimer;
   AnalysisResult? _latestAnalysis;
   String _analysisStatus = "サーバーからの解析結果を待っています...";
@@ -24,7 +26,6 @@ class AnalysisProvider with ChangeNotifier {
 
   void startPolling() {
     stopPolling();
-    // ★初回はすぐに実行
     fetchLatestResults();
     _pollingTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       fetchLatestResults();
@@ -40,36 +41,25 @@ class AnalysisProvider with ChangeNotifier {
     _isFetching = true;
 
     try {
-      final url = Uri.parse('$_baseUrl/results');
+      // ★★★ _config.httpBaseUrl を使用 ★★★
+      final url = Uri.parse('${_config.httpBaseUrl}/api/v1/analysis/results');
       final response = await http.get(url).timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
         final results = jsonDecode(response.body);
-        if (results.containsKey('psd_image')) {
-          _latestAnalysis = AnalysisResult(
-            psdImage: base64Decode(results['psd_image']),
-            coherenceImage: base64Decode(results['coherence_image']),
-          );
-          _analysisStatus =
-              "解析結果を更新しました (${DateTime.now().hour}:${DateTime.now().minute})";
-        } else {
-          _analysisStatus = "サーバーでデータを蓄積中...";
-        }
+        _latestAnalysis = AnalysisResult(
+          psdImage: results['psd_image'] != null ? base64Decode(results['psd_image']) : null,
+          coherenceImage: results['coherence_image'] != null ? base64Decode(results['coherence_image']) : null,
+        );
+        _analysisStatus = "解析結果を更新しました (${DateTime.now().toIso8601String()})";
       } else {
         _analysisStatus = "サーバーエラー: ${response.statusCode}";
       }
     } catch (e) {
       _analysisStatus = "解析サーバーへの接続に失敗";
-      print("Failed to fetch analysis results: $e");
+    } finally {
+      _isFetching = false;
+      notifyListeners();
     }
-
-    _isFetching = false;
-    notifyListeners();
-  }
-
-  @override
-  void dispose() {
-    stopPolling();
-    super.dispose();
   }
 }

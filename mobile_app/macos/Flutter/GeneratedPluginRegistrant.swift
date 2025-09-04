@@ -5,14 +5,12 @@
 import FlutterMacOS
 import Foundation
 
+import file_picker
 import flutter_blue_plus_darwin
-import location
-import record_macos
 import zstandard_macos
 
 func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
+  FilePickerPlugin.register(with: registry.registrar(forPlugin: "FilePickerPlugin"))
   FlutterBluePlusPlugin.register(with: registry.registrar(forPlugin: "FlutterBluePlusPlugin"))
-  LocationPlugin.register(with: registry.registrar(forPlugin: "LocationPlugin"))
-  RecordMacOsPlugin.register(with: registry.registrar(forPlugin: "RecordMacOsPlugin"))
   ZstandardMacosPlugin.register(with: registry.registrar(forPlugin: "ZstandardMacosPlugin"))
 }

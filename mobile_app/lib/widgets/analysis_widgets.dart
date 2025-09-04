@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:collection/collection.dart';
 import 'package:intl/intl.dart';
-import 'ble_provider.dart';
+import '../providers/ble_provider.dart';
 import 'package:provider/provider.dart';
 
 class AnalysisImageViewer extends StatelessWidget {
